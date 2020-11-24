@@ -195,7 +195,10 @@ void RFM95::RFM_Send_Package(unsigned char *RFM_Tx_Package, unsigned char Packag
 
   // EU863-870 specifications
   //switch (TCNT0 % 8)
-  switch (8 % 8)
+
+  // use c-code rand() function for creating an random number
+
+  switch (rand() % 8)
   {
       case 0x00: //Channel 0 868.100 MHz / 61.035 Hz = 14222987 = 0xD9068B
           RFM_Write(0x06,0xD9);

@@ -8,8 +8,16 @@
 
   Hardware information at the end of this file.
 
-  @version 2020-11-04
-  Testing with MiniPill LoRa (STM32L051 processor)
+  @version 2020-11-22
+  Succesfull with MiniPill LoRa (STM32L051 processor) after changing code from
+  ATTiny84.
+
+  @version 2020-11-23
+  Add pseudo random number function to switch between frequencies in RFM95.cpp
+
+  @version 2020-11-25
+  Add low power options to set this device to low power mode
+
 
 
 */
