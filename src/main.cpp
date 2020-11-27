@@ -17,17 +17,18 @@
 
   @version 2020-11-25
   Add low power options to set this device to low power mode
+  First attempt: 0.86 mA
+  Only RFM: 67uA, should be lower than that :)
 
 
 
 */
 #include <Arduino.h>
-//#include <SPI.h>
-#include "BME280.h"
+// #include "BME280.h"
 #include "LoRaWAN.h"
 #include "STM32IntRef.h"
+#include "STM32LowPower.h"
 #include "secconfig.h" // remember to rename secconfig_example.h to secconfig.h and to modify this file
-
 
 /*
   for debugging purposes, usualy not enough memory to use this with both BME
@@ -35,9 +36,8 @@
 */
 // for debugging redirect to hardware Serial2
 // Tx on PA2
-#define Serial Serial2
-HardwareSerial Serial2(USART2);   // or HardWareSerial Serial2 (PA3, PA2);
-
+//#define Serial Serial2
+//HardwareSerial Serial2(USART2);   // or HardWareSerial Serial2 (PA3, PA2);
 
 // RFM95W connection on MiniPill LoRa
 #define DIO0 PA10
@@ -50,7 +50,7 @@ LoRaWAN lora = LoRaWAN(rfm);
 unsigned int Frame_Counter_Tx = 0x0000;
 
 /* A BME280 object using SPI, chip select pin PA1 */
-BME280 bme(SPI,PA1);
+// BME280 bme(SPI,PA1);
 
 // the things network stuff
 // get them from the device overview page! uncomment and put this information here, remove the #include secconfig.h
@@ -61,194 +61,155 @@ BME280 bme(SPI,PA1);
 // unsigned char AppSkey[16] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 // unsigned char DevAddr[4] = { 0x00, 0x00, 0x00, 0x00 };
 
-// sleep cycles that will be counted, start with more than sleep_total to start after 8 seconds with first broadcast.
-volatile int sleep_count = 38;
 
-// set sleep time between broadcasts. The processor awakes after 8 seconds deep-sleep_mode,
-// increase and checks the counter and sleep again until sleep_total is reached.
-// 5min * 60s = 300/8 = 37,5 = 38.
-// 17 seconds longer than 5 minutes with 37, so 35 is more apropriate
-const int sleep_total = 35; // was 35
+// Sleep this many microseconds. Notice that the sending and waiting for downlink
+// will extend the time between send packets. You have to extract this time
+#define SLEEP_INTERVAL 60000
 
 // all functions declared
-void readData(float &temp, float &hum, float &press);
-uint16_t vccVoltage();
-void setUnusedPins();
-void goToSleep();
-void watchdogSetup();
-
+void disableIO();
 
 void setup()
 {
   // for debugging
-  Serial.begin(9600);
-  // define unused pins
+  // Serial.begin(9600);
 
-  Serial.println("Start setup");
-
-  setUnusedPins();
+  // disableIO();
 
   //Initialize RFM module
   rfm.init();
   lora.setKeys(NwkSkey, AppSkey, DevAddr);
-
-  Serial.println("rfm initialized");
-
   delay(500);
-  Serial.println("starting MiniPill LoRa");
 
   // begin communication with BME280 and set to default sampling, iirc, and standby settings
-  if (bme.begin() < 0)
-  {
-    Serial.println("Error communicating with BME280 sensor, please check wiring");
-    while(1){}
-  }
+  // if (bme.begin() < 0)
+  // {
+  //   // Serial.println("Error communicating with BME280 sensor, please check wiring");
+  //   while(1){}
+  // }
 
-  Serial.println("End setup");
+  // Configure low power at startup
+  LowPower.begin();
 
+  // use this delay for first packet send 8 seconds after reset
+  delay(8000);
 }
 
 void loop()
 {
+  // define bytebuffer
+  uint8_t Data_Length = 0x02;
+  uint8_t Data[Data_Length];
 
-  // goToSleep for all devices...
-  // The watchdog timer will reset.
-  //goToSleep();
-  Serial.println("loop");
-  // use this for non-sleep testing:
-  delay(8000);
-  sleep_count++;
+  // read vcc voltage (mv)
+  int32_t vcc = IntRef.readVref();
+  Data[0] = (vcc >> 8) & 0xff;
+  Data[1] = (vcc & 0xff);
 
-  // do action if sleep_total is reached
-  if (sleep_count >= sleep_total)
-  {
-    Serial.println("sending data");
+  // // reading data from BME sensor
+  // bme.readSensor();
+  // float tempFloat = bme.getTemperature_C();
+  // float humFloat = bme.getHumidity_RH();
+  // float pressFloat = bme.getPressure_Pa();
+  //
+  // // from float to uint16_t
+  // uint16_t tempInt = 100 * tempFloat;
+  // uint16_t humInt = 100 * humFloat;
+  // // pressure is already given in 100 x mBar = hPa
+  // uint16_t pressInt = pressFloat/10;
+  //
+  // // move into bytebuffer
+  // Data[2] = (tempInt >> 8) & 0xff;
+  // Data[3] = tempInt & 0xff;
+  //
+  // Data[4] = (humInt >> 8) & 0xff;
+  // Data[5] = humInt & 0xff;
+  //
+  // Data[6] = (pressInt >> 16) & 0xff;
+  // Data[7] = (pressInt >> 8) & 0xff;
+  // Data[8] = pressInt & 0xff;
 
-    // define bytebuffer
-    uint8_t Data_Length = 0x09;
-	  uint8_t Data[Data_Length];
+  lora.Send_Data(Data, Data_Length, Frame_Counter_Tx);
 
-    // read vcc voltage (mv)
-    int32_t vcc = IntRef.readVref();
-    Data[0] = (vcc >> 8) & 0xff;
-    Data[1] = (vcc & 0xff);
+  Frame_Counter_Tx++;
 
-    // reading data from BME sensor
-    bme.readSensor();
-    float tempFloat = bme.getTemperature_C();
-    float humFloat = bme.getHumidity_RH();
-    float pressFloat = bme.getPressure_Pa();
+  // set PA6 to analog to reduce power due to currect flow on DIO on BME280
+  pinMode(PA6, INPUT_ANALOG);
+  // set DIO1 and DIO2 in analog modes because they're not used
+  pinMode(PB4, INPUT_ANALOG); // DIO1
+  pinMode(PB5, INPUT_ANALOG); // DIO2
 
-    // from float to uint16_t
-    uint16_t tempInt = 100 * tempFloat;
-    uint16_t humInt = 100 * humFloat;
-    // pressure is already given in 100 x mBar = hPa
-    uint16_t pressInt = pressFloat/10;
 
-    // move into bytebuffer
-    Data[2] = (tempInt >> 8) & 0xff;
-    Data[3] = tempInt & 0xff;
+  SPI.endTransaction();
+  SPI.end();
 
-    Data[4] = (humInt >> 8) & 0xff;
-    Data[5] = humInt & 0xff;
+  // go to low power mode
+  LowPower.begin();
+  // take SLEEP_INTERVAL time to sleep
+  LowPower.deepSleep(SLEEP_INTERVAL);
 
-    Data[6] = (pressInt >> 16) & 0xff;
-    Data[7] = (pressInt >> 8) & 0xff;
-    Data[8] = pressInt & 0xff;
-
-    lora.Send_Data(Data, Data_Length, Frame_Counter_Tx);
-
-    Frame_Counter_Tx++;
-
-    // reset sleep count
-    sleep_count = 0;
-
-  }
-
+  SPI.begin();
 }
 
 
 /*
   set unused pins so no undefined situation takes place
 */
-void setUnusedPins()
+void disableIO(void)
 {
-  //pinMode(PA0, INPUT_PULLUP);
-  //pinMode(PA1, INPUT_PULLUP);
-  //pinMode(PA2, INPUT_PULLUP);
-  //pinMode(PA3, INPUT_PULLUP);
-  //pinMode(PB2, INPUT_PULLUP);
-}
+  GPIO_InitTypeDef GpioA;
+  uint32_t gpio_pins = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
+  GpioA.Pin = gpio_pins;
+  GpioA.Mode = GPIO_MODE_ANALOG;
+  HAL_GPIO_Init(GPIOA, &GpioA);
 
-/**
- read temperature from BME sensor
-*/
-void readData(float &temp, float &hum, float &press)
-{
-  // set units sensor
-  // BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
-  // BME280::PresUnit presUnit(BME280::PresUnit_Pa);
-  // // read sensor (SPI interface)
-  // bme.read(press, temp, hum, tempUnit, presUnit);
+  // No Reduction due to not using GpioB
+  GPIO_InitTypeDef GpioB;
+  gpio_pins = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | \
+                      GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7 | \
+                      GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11 | \
+                      GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
+  GpioB.Pin = gpio_pins;
+  GpioB.Mode = GPIO_MODE_ANALOG;
+  HAL_GPIO_Init(GPIOB, &GpioB);
 
-}
-
-/**
-  read voltage of the rail (Vcc)
-  output mV (2 bytes)
-*/
-uint16_t vccVoltage()
-{
-  // Read 1.1V reference against AVcc
-  // set the reference to Vcc and the measurement to the internal 1.1V reference
-  // default ADMUX REFS1 and REFS0 = 0
-
-  // #define _BV(bit) (1 << (bit))
-
-  // 1.1V (I Ref)(2) 100001
-  //ADMUX = _BV(MUX5) | _BV(MUX0);
-
-  //delay(2); // Wait for Vref to settle
-  //ADCSRA |= _BV(ADSC); // Start conversion
-  //while (bit_is_set(ADCSRA,ADSC)); // measuring
-
-  //uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH
-  //uint8_t high = ADCH; // unlocks both
-
-  //uint16_t result = (high<<8) | low;
-  uint16_t result = 3300;
-
-
-  // result = 1125300L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
-  // number of steps = 1023??
-  //result = (1125300L / result) ; // Calculate Vcc (in mV);
-
-  return result;
+  __HAL_RCC_GPIOB_CLK_DISABLE();
+  __HAL_RCC_GPIOC_CLK_DISABLE();
+  __HAL_RCC_GPIOH_CLK_DISABLE();
 }
 
 /*
   Hardware setup
-  Attiny84 using the Arduino pin numbers! PB0 = 0 etc.
+  MiniPill LoRa (iot-lab.org)
+  STM32L051C8T6
+
+  P2 connector
+  	PA_0,  // Analog in
+  	PA_1,  // Analog in                 CSB - BME280
+  	PA_2,  // USART2_TX
+  	PA_3,  // USART2_RX
+  	VDD
+  	GND
+  	PA_4,  // SPI1_NSS   NSS - RFM95W
+  	PA_5,  // SPI1_SCK.  SCK - RFM95W   SCL - BME280
+  	PA_6,  // SPI1_MISO. MISO - RFM95W  SDO - BME280
+  	PA_7,  // SPI1_MOSI. MOSI - RFM95W  SDA - BME280
+  	VDD
+  	GND
+
+  P3 connector
+  	PA_9,  // USART1_TX. RST - RFM95W
+  	PA_10, // USART1_RX. DIO0 - RFM95W
+  	PB_4,  //            DIO1 - RFM95W
+  	PB_5,  //            DIO2 - RFM95W
+  	PB_6,  // USART1_TX
+  	PB_7,  // USART1_RX
+  	PB_8,  // I2C1_SCL
+  	PB_9,  // I2C1_SDA
+  	PB_10, // LPUART1_TX
+  	PB_11, // LPUART1_RX
+  	VDD
+  	GND
 
 
-  Atmel ATtiny84A PU
-  RFM95W
-  BME280
-
-  Power: 3V3 - 470uF elco over power connectors, 100nF over power connector for interference suppression
-  Connections:
-  RFM95W   ATtiny84
-
-  DIO0 -- PB0
-  MISO -- MOSI
-  MOSI -- MISO
-  SCK  -- SCK
-  NSS  -- PB1 (this is Chipselect)
-
-  Bosch BME280 sensor used with tinySPI....
-  BME280  ATtiny84
-  SCL -- SCK
-  SDA -- MISO
-  SDO -- MOSI
-  CSB -- PA7 (this is Chipselect)
 */

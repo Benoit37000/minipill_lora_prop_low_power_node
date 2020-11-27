@@ -9,11 +9,12 @@
 
 #include "Arduino.h"
 #include "RFM95.h"
+#include <SPI.h>
 
 // constructor
-RFM95::RFM95(SPIClass &SPI ,int DIO0, int NSS)
+RFM95::RFM95(SPIClass &bus, int DIO0, int NSS)
 {
-  _SPI = &SPI;
+  _SPI = &bus;
   _DIO0 = DIO0;
   _NSS = NSS;
 }
