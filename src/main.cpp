@@ -15,16 +15,16 @@
   @version 2020-11-23
   Add pseudo random number function to switch between frequencies in RFM95.cpp
 
-  @version 2020-11-25
-  Add low power options to set this device to low power mode
-  First attempt: 0.86 mA
-  Only RFM: 67uA, should be lower than that :)
+  @version 2020-11-27
+  Added ISP.end in main code to disable ISP system. It saves about 66uA and
+  reduced the total power usage to 1.3uA without BME280
 
-
+  @version 2020-11-28
+  Added BME280, total power usage 1.5uA in sleep mode
 
 */
 #include <Arduino.h>
-// #include "BME280.h"
+#include "BME280.h"
 #include "LoRaWAN.h"
 #include "STM32IntRef.h"
 #include "STM32LowPower.h"
@@ -50,7 +50,7 @@ LoRaWAN lora = LoRaWAN(rfm);
 unsigned int Frame_Counter_Tx = 0x0000;
 
 /* A BME280 object using SPI, chip select pin PA1 */
-// BME280 bme(SPI,PA1);
+BME280 bme(SPI,PA1);
 
 // the things network stuff
 // get them from the device overview page! uncomment and put this information here, remove the #include secconfig.h
@@ -60,7 +60,6 @@ unsigned int Frame_Counter_Tx = 0x0000;
 // unsigned char NwkSkey[16] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 // unsigned char AppSkey[16] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 // unsigned char DevAddr[4] = { 0x00, 0x00, 0x00, 0x00 };
-
 
 // Sleep this many microseconds. Notice that the sending and waiting for downlink
 // will extend the time between send packets. You have to extract this time
@@ -82,11 +81,11 @@ void setup()
   delay(500);
 
   // begin communication with BME280 and set to default sampling, iirc, and standby settings
-  // if (bme.begin() < 0)
-  // {
-  //   // Serial.println("Error communicating with BME280 sensor, please check wiring");
-  //   while(1){}
-  // }
+  if (bme.begin() < 0)
+  {
+     // Serial.println("Error communicating with BME280 sensor, please check wiring");
+     while(1){}
+  }
 
   // Configure low power at startup
   LowPower.begin();
@@ -98,7 +97,7 @@ void setup()
 void loop()
 {
   // define bytebuffer
-  uint8_t Data_Length = 0x02;
+  uint8_t Data_Length = 0x09;
   uint8_t Data[Data_Length];
 
   // read vcc voltage (mv)
@@ -106,40 +105,38 @@ void loop()
   Data[0] = (vcc >> 8) & 0xff;
   Data[1] = (vcc & 0xff);
 
-  // // reading data from BME sensor
-  // bme.readSensor();
-  // float tempFloat = bme.getTemperature_C();
-  // float humFloat = bme.getHumidity_RH();
-  // float pressFloat = bme.getPressure_Pa();
-  //
-  // // from float to uint16_t
-  // uint16_t tempInt = 100 * tempFloat;
-  // uint16_t humInt = 100 * humFloat;
-  // // pressure is already given in 100 x mBar = hPa
-  // uint16_t pressInt = pressFloat/10;
-  //
-  // // move into bytebuffer
-  // Data[2] = (tempInt >> 8) & 0xff;
-  // Data[3] = tempInt & 0xff;
-  //
-  // Data[4] = (humInt >> 8) & 0xff;
-  // Data[5] = humInt & 0xff;
-  //
-  // Data[6] = (pressInt >> 16) & 0xff;
-  // Data[7] = (pressInt >> 8) & 0xff;
-  // Data[8] = pressInt & 0xff;
+  // reading data from BME sensor
+  bme.readSensor();
+  float tempFloat = bme.getTemperature_C();
+  float humFloat = bme.getHumidity_RH();
+  float pressFloat = bme.getPressure_Pa();
+
+  // from float to uint16_t
+  uint16_t tempInt = 100 * tempFloat;
+  uint16_t humInt = 100 * humFloat;
+  // pressure is already given in 100 x mBar = hPa
+  uint16_t pressInt = pressFloat/10;
+
+  // move into bytebuffer
+  Data[2] = (tempInt >> 8) & 0xff;
+  Data[3] = tempInt & 0xff;
+
+  Data[4] = (humInt >> 8) & 0xff;
+  Data[5] = humInt & 0xff;
+
+  Data[6] = (pressInt >> 16) & 0xff;
+  Data[7] = (pressInt >> 8) & 0xff;
+  Data[8] = pressInt & 0xff;
 
   lora.Send_Data(Data, Data_Length, Frame_Counter_Tx);
 
   Frame_Counter_Tx++;
 
+  bme.goToSleep();
   // set PA6 to analog to reduce power due to currect flow on DIO on BME280
+  // reduces 50uA
   pinMode(PA6, INPUT_ANALOG);
-  // set DIO1 and DIO2 in analog modes because they're not used
-  pinMode(PB4, INPUT_ANALOG); // DIO1
-  pinMode(PB5, INPUT_ANALOG); // DIO2
-
-
+  // disable SPI, reduces 67uA
   SPI.endTransaction();
   SPI.end();
 
@@ -147,7 +144,7 @@ void loop()
   LowPower.begin();
   // take SLEEP_INTERVAL time to sleep
   LowPower.deepSleep(SLEEP_INTERVAL);
-
+  // start SPI after sleep
   SPI.begin();
 }
 
