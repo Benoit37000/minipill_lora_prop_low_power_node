@@ -10,7 +10,8 @@
 
   @version 2020-11-22
   Succesfull with MiniPill LoRa (STM32L051 processor) after changing code from
-  ATTiny84.
+  ATTiny84. There is no downlink window! Advantage is the lower power consumption,
+  but it is not following the LoRaWAN specifications.
 
   @version 2020-11-23
   Add pseudo random number function to switch between frequencies in RFM95.cpp
@@ -61,9 +62,8 @@ BME280 bme(SPI,PA1);
 // unsigned char AppSkey[16] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 // unsigned char DevAddr[4] = { 0x00, 0x00, 0x00, 0x00 };
 
-// Sleep this many microseconds. Notice that the sending and waiting for downlink
-// will extend the time between send packets. You have to extract this time
-#define SLEEP_INTERVAL 60000
+// Sleep this many microseconds.
+#define SLEEP_INTERVAL 300000
 
 // all functions declared
 void disableIO();
